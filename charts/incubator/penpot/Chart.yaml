@@ -1,0 +1,48 @@
+annotations:
+  artifacthub.io/links: |-
+    - name: support
+      url: https://discord.com/invite/tVsPTHWTtr
+  truecharts.org/train: incubator
+  trueforge.org/category: productivity
+  trueforge.org/max_helm_version: "4.1"
+  trueforge.org/max_kubernetes_version: 1.35.0
+  trueforge.org/min_helm_version: "3.14"
+  trueforge.org/train: incubator
+apiVersion: v2
+appVersion: 2.18.3
+dependencies:
+  - name: common
+    version: 30.2.0
+    repository: oci://oci.trueforge.org/truecharts
+    condition: ""
+    alias: ""
+    tags: []
+    import-values: []
+  - name: valkey
+    version: 3.0.0
+    repository: oci://oci.trueforge.org/truecharts
+    condition: redis.enabled
+    alias: redis
+    tags: []
+    import-values: []
+deprecated: false
+description: Penpot is an open-source design and prototyping platform for design and code collaboration.
+home: https://truecharts.org/charts/incubator/penpot
+icon: https://truecharts.org/img/hotlink-ok/chart-icons/penpot.webp
+keywords:
+  - penpot
+  - design
+  - prototyping
+  - svg
+kubeVersion: '>=1.33.0-0'
+maintainers:
+  - name: TrueCharts
+    email: info@truecharts.org
+    url: https://truecharts.org
+name: penpot
+sources:
+  - https://github.com/penpot/penpot
+  - https://ghcr.io/penpotapp/frontend
+  - https://github.com/trueforge-org/truecharts/tree/master/charts/incubator/penpot
+type: application
+version: 0.1.0
