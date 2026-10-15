@@ -1,0 +1,394 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: docker.io/penpotapp/frontend
+  pullPolicy: IfNotPresent
+  tag: 2.18.3@sha256:2c7f4e840102e06bccf36b6a93fc3a030cc0bbba7e0125dec33197187dba8041
+
+backendImage:
+  repository: docker.io/penpotapp/backend
+  pullPolicy: IfNotPresent
+  tag: 2.18.3@sha256:47d33d6c94685332fb115f815be2414cefbf022d93d79fa03a8d439ea587c109
+
+exporterImage:
+  repository: docker.io/penpotapp/exporter
+  pullPolicy: IfNotPresent
+  tag: 2.18.3@sha256:11e4114359b65d68e8bc980297fb728d577a182a7a18ba059bfcf9de0343ec6a
+
+mcpImage:
+  repository: docker.io/penpotapp/mcp
+  pullPolicy: IfNotPresent
+  tag: 2.18.3@sha256:42a83f5514c935f92b0d53f88c61b8c736fbd84e0e674c6fe28b0a2690ef4c99
+
+adminConsoleImage:
+  repository: docker.io/penpotapp/admin-console
+  pullPolicy: IfNotPresent
+  tag: 2.18.3@sha256:679bada92344ad5ebd1ee68b5067d63592383a050e3e5da63d106b259e1b0ac9
+
+penpot:
+  # The public URI Penpot is served on (e.g. https://penpot.example.com)
+  # When serving on a non-HTTPS domain, add disable-secure-session-cookies to the flags
+  publicUri: http://penpot.example.com
+  # Feature flags. The MCP and Admin Console workloads are automatically
+  # enabled when enable-mcp / enable-admin-console are present here.
+  flags: enable-registration enable-login-with-password disable-email-verification
+  # Random secret key for persistent user sessions
+  apiSecretKey: CHANGE-ME-TO-A-LONG-RANDOM-STRING
+  registrationDomainWhitelist: ""
+  telemetryEnabled: "true"
+  # Custom DNS resolver for the frontend nginx, empty to use the pod resolver
+  internalResolver: ""
+  termsOfServicesUri: ""
+  privacyPolicyUri: ""
+  httpServerMaxBodySize: "367001600"
+  # legacy-db, db or storage
+  fileDataBackend: legacy-db
+  autoFileSnapshot:
+    every: 5
+    timeout: 3h
+
+  # External PostgreSQL connection, used when CNPG is disabled
+  # (host, port, username, password, database)
+  postgresql:
+    host: ""
+    port: 5432
+    username: penpot
+    password: ""
+    database: penpot
+
+  # External Redis/Valkey URI, used when the Valkey dependency is disabled
+  # redisUri: redis://user:pass@host:6379/0
+
+  # fs or s3
+  objectsStorage:
+    storageBackend: fs
+    filesystem:
+      directory: /opt/data/assets
+    s3:
+      accessKeyID: ""
+      secretAccessKey: ""
+      region: ""
+      bucket: ""
+      endpointURI: ""
+
+  smtp:
+    enabled: false
+    # Also add enable-smtp to the flags
+    defaultFrom: ""
+    defaultReplyTo: ""
+    host: ""
+    port: ""
+    username: ""
+    password: ""
+    tls: "true"
+    ssl: "false"
+
+  providers:
+    google:
+      # Also add enable-login-with-google to the flags
+      enabled: false
+      clientID: ""
+      clientSecret: ""
+    github:
+      # Also add enable-login-with-github to the flags
+      enabled: false
+      clientID: ""
+      clientSecret: ""
+    gitlab:
+      # Also add enable-login-with-gitlab to the flags
+      enabled: false
+      baseURI: https://gitlab.com
+      clientID: ""
+      clientSecret: ""
+    oidc:
+      # Also add enable-login-with-oidc to the flags
+      enabled: false
+      baseURI: ""
+      clientID: ""
+      clientSecret: ""
+      authURI: ""
+      tokenURI: ""
+      userURI: ""
+      roles: ""
+      rolesAttribute: ""
+      scopes: ""
+      nameAttribute: ""
+      emailAttribute: ""
+      userInfoSource: ""
+    ldap:
+      # Also add enable-login-with-ldap to the flags
+      enabled: false
+      host: ldap
+      port: 10389
+      ssl: "false"
+      startTLS: "false"
+      baseDN: ""
+      bindDN: ""
+      bindPassword: ""
+      userQuery: ""
+      attributesUsername: uid
+      attributesEmail: mail
+      attributesFullname: cn
+      attributesPhoto: jpegPhoto
+
+securityContext:
+  container:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: false
+    runAsUser: 1001
+    runAsGroup: 1001
+
+service:
+  main:
+    targetSelector: main
+    ports:
+      main:
+        targetSelector: main
+        protocol: http
+        targetPort: 8080
+        port: 10703
+  backend:
+    enabled: true
+    targetSelector: backend
+    ports:
+      backend:
+        enabled: true
+        targetSelector: backend
+        protocol: http
+        targetPort: 6060
+        port: 10704
+  exporter:
+    enabled: true
+    targetSelector: exporter
+    ports:
+      exporter:
+        enabled: true
+        targetSelector: exporter
+        protocol: http
+        targetPort: 6061
+        port: 10705
+  mcp:
+    enabled: '{{ has "enable-mcp" (splitList " " .Values.penpot.flags) }}'
+    targetSelector: mcp
+    ports:
+      mcp-http:
+        enabled: true
+        targetSelector: mcp
+        protocol: http
+        targetPort: 4401
+        port: 10706
+      mcp-ws:
+        enabled: true
+        targetSelector: mcp
+        protocol: http
+        targetPort: 4402
+        port: 10707
+  admin-console:
+    enabled: '{{ has "enable-admin-console" (splitList " " .Values.penpot.flags) }}'
+    targetSelector: admin-console
+    ports:
+      admin-console:
+        enabled: true
+        targetSelector: admin-console
+        protocol: http
+        targetPort: 3000
+        port: 10708
+
+workload:
+  # Frontend (nginx serving the SPA and proxying to the backend)
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: image
+          env:
+            PENPOT_FLAGS: "{{ .Values.penpot.flags }}"
+            PENPOT_PUBLIC_URI: "{{ .Values.penpot.publicUri }}"
+            PENPOT_BACKEND_URI: '{{ printf "%s-backend:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.backend.ports.backend.port }}'
+            PENPOT_EXPORTER_URI: '{{ printf "%s-exporter:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.exporter.ports.exporter.port }}'
+            PENPOT_TERMS_OF_SERVICE_URI: "{{ .Values.penpot.termsOfServicesUri }}"
+            PENPOT_PRIVACY_POLICY_URI: "{{ .Values.penpot.privacyPolicyUri }}"
+            PENPOT_HTTP_SERVER_MAX_BODY_SIZE: "{{ .Values.penpot.httpServerMaxBodySize }}"
+            PENPOT_INTERNAL_RESOLVER: "{{ .Values.penpot.internalResolver }}"
+            PENPOT_MCP_URI: '{{ if has "enable-mcp" (splitList " " .Values.penpot.flags) }}{{ printf "%s-mcp:%v" (include "tc.v1.common.lib.chart.names.fullname" $) (index .Values.service.mcp.ports "mcp-http").port }}{{ end }}'
+            PENPOT_MCP_URI_WS: '{{ if has "enable-mcp" (splitList " " .Values.penpot.flags) }}{{ printf "%s-mcp:%v" (include "tc.v1.common.lib.chart.names.fullname" $) (index .Values.service.mcp.ports "mcp-ws").port }}{{ end }}'
+            PENPOT_ADMIN_CONSOLE_URI: '{{ if has "enable-admin-console" (splitList " " .Values.penpot.flags) }}{{ printf "%s-admin-console:%v" (include "tc.v1.common.lib.chart.names.fullname" $) (index (index .Values.service "admin-console").ports "admin-console").port }}{{ end }}'
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+  # Backend (API)
+  backend:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        backend:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /readyz
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /readyz
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /readyz
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+
+  # Exporter (renders designs to images/PDF)
+  exporter:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        exporter:
+          enabled: true
+          primary: true
+          imageSelector: exporterImage
+          env:
+            PENPOT_PUBLIC_URI: "{{ .Values.penpot.publicUri }}"
+            PENPOT_INTERNAL_URI: '{{ printf "%s:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.main.ports.main.port }}'
+            PENPOT_TEMPDIR: /tmp/penpot-exporter
+          envFrom:
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.exporter.ports.exporter.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.exporter.ports.exporter.targetPort }}"
+            startup:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.exporter.ports.exporter.targetPort }}"
+
+  # MCP server (enabled via the enable-mcp flag)
+  mcp:
+    enabled: '{{ has "enable-mcp" (splitList " " .Values.penpot.flags) }}'
+    type: Deployment
+    podSpec:
+      containers:
+        mcp:
+          enabled: true
+          primary: true
+          imageSelector: mcpImage
+          env:
+            PENPOT_MCP_SERVER_PORT: '{{ (index .Values.service.mcp.ports "mcp-http").targetPort }}'
+            PENPOT_MCP_WEBSOCKET_PORT: '{{ (index .Values.service.mcp.ports "mcp-ws").targetPort }}'
+            PENPOT_MCP_REMOTE_MODE: "true"
+          envFrom:
+            - configMapRef:
+                name: redis
+          probes:
+            liveness:
+              enabled: true
+              type: tcp
+              port: '{{ (index .Values.service.mcp.ports "mcp-http").targetPort }}'
+            readiness:
+              enabled: true
+              type: tcp
+              port: '{{ (index .Values.service.mcp.ports "mcp-http").targetPort }}'
+            startup:
+              enabled: true
+              type: tcp
+              port: '{{ (index .Values.service.mcp.ports "mcp-http").targetPort }}'
+
+  # Admin console (enabled via the enable-admin-console flag)
+  admin-console:
+    enabled: '{{ has "enable-admin-console" (splitList " " .Values.penpot.flags) }}'
+    type: Deployment
+    podSpec:
+      containers:
+        admin-console:
+          enabled: true
+          primary: true
+          imageSelector: adminConsoleImage
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: '{{ (index (index .Values.service "admin-console").ports "admin-console").targetPort }}'
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: '{{ (index (index .Values.service "admin-console").ports "admin-console").targetPort }}'
+            startup:
+              enabled: true
+              type: tcp
+              port: '{{ (index (index .Values.service "admin-console").ports "admin-console").targetPort }}'
+
+persistence:
+  # Assets (images and svg clips) shared between the frontend and backend
+  assets:
+    enabled: true
+    mountPath: /opt/data/assets
+    targetSelector:
+      main:
+        main:
+          mountPath: /opt/data/assets
+      backend:
+        backend:
+          mountPath: /opt/data/assets
+  # Writable temp dir for the exporter
+  exporter-tmp:
+    enabled: true
+    type: emptyDir
+    mountPath: /tmp/penpot-exporter
+    targetSelector:
+      exporter:
+        exporter:
+          mountPath: /tmp/penpot-exporter
+
+cnpg:
+  main:
+    enabled: true
+    user: penpot
+    database: penpot
+
+redis:
+  enabled: true
+  redisUsername: default

@@ -1,0 +1,23 @@
+{{/* Make sure all variables are set properly */}}
+{{- include "tc.v1.common.loader.init" . }}
+
+{{/* Render the config for penpot */}}
+{{- $config := include "penpot.config" . | fromYaml -}}
+{{- if $config -}}
+  {{- $_ := set .Values.configmap "config" $config -}}
+{{- end -}}
+
+{{/* Render the redis config for penpot */}}
+{{- $redisConfig := include "penpot.redisConfig" . | fromYaml -}}
+{{- if $redisConfig -}}
+  {{- $_ := set .Values.configmap "redis" $redisConfig -}}
+{{- end -}}
+
+{{/* Render the secrets for penpot */}}
+{{- $secrets := include "penpot.secrets" . | fromYaml -}}
+{{- if $secrets -}}
+  {{- $_ := set .Values.secret "secrets" $secrets -}}
+{{- end -}}
+
+{{/* Render the templates */}}
+{{ include "tc.v1.common.loader.apply" . }}
