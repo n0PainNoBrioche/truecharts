@@ -1,0 +1,17 @@
+{{/* Make sure all variables are set properly */}}
+{{- include "tc.v1.common.loader.init" . }}
+
+{{/* Render the config for meet */}}
+{{- $config := include "meet.config" . | fromYaml -}}
+{{- if $config -}}
+  {{- $_ := set .Values.configmap "config" $config -}}
+{{- end -}}
+
+{{/* Render the secrets for meet */}}
+{{- $secrets := include "meet.secrets" . | fromYaml -}}
+{{- if $secrets -}}
+  {{- $_ := set .Values.secret "secrets" $secrets -}}
+{{- end -}}
+
+{{/* Render the templates */}}
+{{ include "tc.v1.common.loader.apply" . }}

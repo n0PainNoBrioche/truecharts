@@ -1,0 +1,224 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: docker.io/lasuite/meet-backend
+  pullPolicy: IfNotPresent
+  tag: 1.34.0@sha256:5a1c395de9501b58aefeb974f3fa3bd3dfdbac804934fac83963ca2eeeb8eca5
+
+frontendImage:
+  repository: docker.io/lasuite/meet-frontend
+  pullPolicy: IfNotPresent
+  tag: 1.34.0@sha256:f3332b2e09ae00ae419946201a821a3ffa66ffb340a4461fabaabf17e1ca979b
+
+meet:
+  # Public URL where La Suite Meet is served (e.g. https://meet.example.com)
+  publicUrl: http://meet.example.com
+
+  # Sensitive configuration, rendered as env variables
+  secret:
+    # MUST be changed in production
+    djangoSecretKey: CHANGE-ME-TO-A-LONG-RANDOM-STRING
+    # OIDC provider configuration (required)
+    oidcOpJwksEndpoint: ""
+    oidcOpAuthorizationEndpoint: ""
+    oidcOpTokenEndpoint: ""
+    oidcOpUserEndpoint: ""
+    oidcOpLogoutEndpoint: ""
+    oidcRpClientId: ""
+    oidcRpClientSecret: ""
+    # LiveKit server connection (required)
+    livekitApiSecret: ""
+    livekitApiKey: ""
+    # Optional Django superuser created by the bootstrap job
+    superuserEmail: admin@example.com
+    superuserPassword: ""
+
+  # Non-sensitive configuration, rendered as env variables
+  config:
+    djangoConfiguration: Production
+    djangoSettingsModule: meet.settings
+    djangoSilencedSystemChecks: security.W004, security.W008
+    # Comma-separated list, auto-computed from publicUrl when empty
+    djangoCsrfTrustedOrigins: ""
+    # Space-separated list, auto-computed from publicUrl when empty
+    djangoAllowedHosts: ""
+    oidcRpSignAlgo: RS256
+    oidcRpScopes: openid email
+    oidcRedirectAllowedHosts: ""
+    oidcAuthRequestExtraParams: ""
+    loginRedirectUrl: ""
+    loginRedirectUrlFailure: ""
+    logoutRedirectUrl: ""
+    allowUnregisteredRooms: "False"
+    frontendSilenceLivekitDebug: "False"
+    # Email (SMTP) configuration
+    emailHost: ""
+    emailPort: "1025"
+    emailUseSSL: "False"
+    # LiveKit API URL (e.g. https://livekit.example.com)
+    livekitApiUrl: ""
+    # External PostgreSQL connection, used when CNPG is disabled
+    # databaseUrl: postgresql://user:pass@host:5432/meet
+    # External Redis/Valkey URL, used when the Valkey dependency is disabled
+    # redisUrl: redis://user:pass@host:6379/1
+
+securityContext:
+  container:
+    runAsNonRoot: false
+    readOnlyRootFilesystem: false
+    runAsUser: 0
+    runAsGroup: 0
+
+service:
+  main:
+    targetSelector: main
+    ports:
+      main:
+        targetSelector: main
+        protocol: http
+        targetPort: 8080
+        port: 10709
+  backend:
+    enabled: true
+    targetSelector: backend
+    ports:
+      backend:
+        enabled: true
+        targetSelector: backend
+        protocol: http
+        targetPort: 8000
+        port: 10710
+
+workload:
+  # Frontend (Vite/nginx serving the React app)
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: frontendImage
+          env:
+            VITE_PORT: "{{ .Values.service.main.ports.main.targetPort }}"
+            VITE_HOST: 0.0.0.0
+            VITE_API_BASE_URL: "{{ .Values.meet.publicUrl }}/"
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+  # Backend (Django API)
+  backend:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        backend:
+          enabled: true
+          primary: true
+          imageSelector: image
+          command:
+            - gunicorn
+            - -c
+            - /usr/local/etc/gunicorn/meet.py
+            - meet.wsgi:application
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /__lbheartbeat__
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /__heartbeat__
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /__lbheartbeat__
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+      initContainers:
+        migrate:
+          enabled: true
+          type: init
+          imageSelector: image
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          command:
+            - /bin/sh
+            - -c
+            - |
+              while ! python manage.py check --database default > /dev/null 2>&1
+              do
+                echo "Database not ready"
+                sleep 2
+              done
+              echo "Database is ready"
+              python manage.py migrate --no-input
+
+  # Celery worker (async tasks: recordings, webhooks)
+  celery:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        celery:
+          enabled: true
+          primary: true
+          imageSelector: image
+          command:
+            - celery
+            - -A
+            - meet.celery_app
+            - worker
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            readiness:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            startup:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+
+cnpg:
+  main:
+    enabled: true
+    user: meet
+    database: meet
+
+redis:
+  enabled: true
+  redisUsername: default
