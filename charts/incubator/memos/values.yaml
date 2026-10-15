@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: docker.io/neosmemo/memos
+  pullPolicy: IfNotPresent
+  tag: 0.31.0@sha256:8596928c21551afc7d4e100051510bc134fd0caae51ad1d26cf899845d719321
+
+memos:
+  # Canonical external URL of the Memos instance (e.g. https://memos.example.com)
+  instanceUrl: ""
+  # Database driver: sqlite (default, stored in the data PVC), postgres or mysql
+  # When using postgres or mysql, set the DSN below or use the bundled CNPG
+  # (postgres) via cnpg.main.enabled.
+  driver: sqlite
+  # Data source name. Auto-computed from CNPG credentials when the bundled
+  # postgres is enabled, ignored for sqlite.
+  dsn: ""
+  # Log verbosity level: debug, info, warn, error
+  logLevel: info
+  # Enable the request rate limiter
+  rateLimit: "true"
+  # Proxies whose forwarding headers identify the client: CIDRs, IPs,
+  # "private" (default; loopback and private ranges) or "none"
+  trustedProxies: private
+  # Enable demo mode (forces the sqlite driver)
+  demo: "false"
+
+securityContext:
+  container:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: false
+    runAsUser: 10001
+    runAsGroup: 10001
+
+service:
+  main:
+    ports:
+      main:
+        protocol: http
+        targetPort: 5230
+        port: 10714
+
+workload:
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: image
+          env:
+            MEMOS_PORT: "{{ .Values.service.main.ports.main.targetPort }}"
+            MEMOS_DATA: /var/opt/memos
+            MEMOS_DRIVER: "{{ .Values.memos.driver }}"
+            MEMOS_LOG_LEVEL: "{{ .Values.memos.logLevel }}"
+            MEMOS_RATE_LIMIT: "{{ .Values.memos.rateLimit }}"
+            MEMOS_TRUSTED_PROXIES: "{{ .Values.memos.trustedProxies }}"
+            MEMOS_DEMO: "{{ .Values.memos.demo }}"
+            MEMOS_INSTANCE_URL: "{{ .Values.memos.instanceUrl }}"
+            MEMOS_DSN: '{{ ternary (include "memos.dsn" $) .Values.memos.dsn (and (eq .Values.memos.driver "postgres") .Values.cnpg.main.enabled) }}'
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+persistence:
+  data:
+    enabled: true
+    mountPath: /var/opt/memos
+    targetSelector:
+      main:
+        main:
+          mountPath: /var/opt/memos
+
+# Optional bundled PostgreSQL. Enable cnpg and set memos.driver to postgres
+# to use it instead of the default sqlite.
+cnpg:
+  main:
+    enabled: false
+    user: memos
+    database: memos
