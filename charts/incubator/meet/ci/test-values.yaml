@@ -1,0 +1,5 @@
+meet:
+  publicUrl: http://meet.local
+  secret:
+    oidcRpClientId: meet
+    oidcRpClientSecret: devsecret

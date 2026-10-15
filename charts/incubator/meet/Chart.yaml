@@ -1,0 +1,48 @@
+annotations:
+  artifacthub.io/links: |-
+    - name: support
+      url: https://discord.com/invite/tVsPTHWTtr
+  truecharts.org/train: incubator
+  trueforge.org/category: productivity
+  trueforge.org/max_helm_version: "4.1"
+  trueforge.org/max_kubernetes_version: 1.35.0
+  trueforge.org/min_helm_version: "3.14"
+  trueforge.org/train: incubator
+apiVersion: v2
+appVersion: 1.34.0
+dependencies:
+  - name: common
+    version: 30.2.0
+    repository: oci://oci.trueforge.org/truecharts
+    condition: ""
+    alias: ""
+    tags: []
+    import-values: []
+  - name: valkey
+    version: 3.0.0
+    repository: oci://oci.trueforge.org/truecharts
+    condition: redis.enabled
+    alias: redis
+    tags: []
+    import-values: []
+deprecated: false
+description: La Suite Meet is an open-source video conferencing app powered by LiveKit, built with Django and React.
+home: https://truecharts.org/charts/incubator/meet
+icon: https://truecharts.org/img/hotlink-ok/chart-icons/meet.webp
+keywords:
+  - meet
+  - video
+  - conferencing
+  - webrtc
+  - livekit
+kubeVersion: '>=1.33.0-0'
+maintainers:
+  - name: TrueCharts
+    email: info@truecharts.org
+    url: https://truecharts.org
+name: meet
+sources:
+  - https://github.com/suitenumerique/meet
+  - https://github.com/trueforge-org/truecharts/tree/master/charts/incubator/meet
+type: application
+version: 0.1.0
