@@ -1,0 +1,9 @@
+plane:
+  web_url: "http://plane.example.com"
+  secret_key: "testsecretkeytestsecretkeytestsecret"
+  live:
+    secret_key: "testlivesecretkeytestlivesecretkey"
+  storage:
+    secret_key: "teststoragekeyteststoragekey"
+  mq:
+    password: "testmqpasswordtestmqpassword"
