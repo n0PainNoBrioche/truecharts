@@ -1,0 +1,542 @@
+# yaml-language-server: $schema=./values.schema.json
+securityContext:
+  container:
+    runAsNonRoot: false
+    readOnlyRootFilesystem: false
+    runAsUser: 0
+    runAsGroup: 0
+
+image:
+  pullPolicy: IfNotPresent
+  repository: makeplane/plane-backend
+  tag: v1.4.2@sha256:01a159fa9947ec6cd553d360fcfdac63743f2b1503e631ca7e3e5deeb7346ca
+
+frontendImage:
+  pullPolicy: IfNotPresent
+  repository: makeplane/plane-frontend
+  tag: v1.4.2@sha256:686faa25da4bb031ef5cbf8f6ad1fea60c416dcec11d113643c3d2bb99e70d44
+
+spaceImage:
+  pullPolicy: IfNotPresent
+  repository: makeplane/plane-space
+  tag: v1.4.2@sha256:69d0f9d545931e3c7195eb0335c3a7739da849a12c3827971e48e9f6babf2a54
+
+adminImage:
+  pullPolicy: IfNotPresent
+  repository: makeplane/plane-admin
+  tag: v1.4.2@sha256:40c0f58f4de29f8e30d4fa4c5db2c8bc88e64e1ea14ea81c48368e8408b0a609
+
+liveImage:
+  pullPolicy: IfNotPresent
+  repository: makeplane/plane-live
+  tag: v1.4.2@sha256:1e7c180f16e568db51b8739d9cccee8c450b52dab6335e06ed1c29fc45aecae9
+
+proxyImage:
+  pullPolicy: IfNotPresent
+  repository: makeplane/plane-proxy
+  tag: v1.4.2@sha256:0647b6be3494571e7dbef862462cde0b5bf6a7c8b10303104234baa4e76b889b
+
+plane:
+  web_url: "http://localhost:10713"
+  secret_key: "CHANGE-ME-TO-A-LONG-RANDOM-STRING"
+  file_size_limit: "52428800"
+  cors_allowed_origins: ""
+  sentry_dsn: ""
+  sentry_environment: ""
+  debug: false
+  space:
+    enabled: true
+  admin:
+    enabled: true
+  live:
+    enabled: true
+    secret_key: "CHANGE-ME-TO-A-LONG-RANDOM-STRING"
+  storage:
+    bucket: uploads
+    access_key: plane
+    secret_key: "CHANGE-ME-TO-A-LONG-PASSWORD"
+  mq:
+    user: plane
+    password: "CHANGE-ME-TO-A-LONG-PASSWORD"
+    vhost: plane
+
+rabbitmqImage:
+  pullPolicy: IfNotPresent
+  repository: rabbitmq
+  tag: 3.13.6-management-alpine@sha256:567378bee7c4b7401bc5165e3ff406c4481ae3cbd9daed4ad3c2821bd97ae3f4
+
+minioImage:
+  pullPolicy: IfNotPresent
+  repository: pgsty/silo
+  tag: RELEASE.2026-09-16T00-00-00Z@sha256:39aab3c365848e32aca7b76c5b57f86d1cbca02d7b8f24e1fd1feff9fedddae5
+
+service:
+  main:
+    ports:
+      main:
+        enabled: true
+        primary: true
+        port: 10713
+        targetPort: 80
+        protocol: http
+  web:
+    enabled: true
+    expandObjectName: false
+    targetSelector: web
+    ports:
+      web:
+        enabled: true
+        port: 3000
+        targetPort: 3000
+        protocol: http
+  space:
+    enabled: "{{ .Values.plane.space.enabled }}"
+    expandObjectName: false
+    targetSelector: space
+    ports:
+      space:
+        enabled: true
+        port: 3000
+        targetPort: 3000
+        protocol: http
+  admin:
+    enabled: "{{ .Values.plane.admin.enabled }}"
+    expandObjectName: false
+    targetSelector: admin
+    ports:
+      admin:
+        enabled: true
+        port: 3000
+        targetPort: 3000
+        protocol: http
+  live:
+    enabled: "{{ .Values.plane.live.enabled }}"
+    expandObjectName: false
+    targetSelector: live
+    ports:
+      live:
+        enabled: true
+        port: 3000
+        targetPort: 3000
+        protocol: http
+  api:
+    enabled: true
+    expandObjectName: false
+    targetSelector: api
+    ports:
+      api:
+        enabled: true
+        port: 8000
+        targetPort: 8000
+        protocol: http
+  plane-minio:
+    enabled: true
+    expandObjectName: false
+    targetSelector: plane-minio
+    ports:
+      plane-minio:
+        enabled: true
+        port: 9000
+        targetPort: 9000
+        protocol: http
+  plane-rabbitmq:
+    enabled: true
+    expandObjectName: false
+    targetSelector: plane-rabbitmq
+    ports:
+      plane-rabbitmq:
+        enabled: true
+        port: 5672
+        targetPort: 5672
+        protocol: http
+
+workload:
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: proxyImage
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: 80
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: 80
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: 80
+          env:
+            NGINX_PORT: "80"
+            FILE_SIZE_LIMIT: "{{ .Values.plane.file_size_limit }}"
+            BUCKET_NAME: "{{ .Values.plane.storage.bucket }}"
+  web:
+    enabled: true
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        web:
+          enabled: true
+          primary: true
+          imageSelector: frontendImage
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: 3000
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: 3000
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: 3000
+  space:
+    enabled: "{{ .Values.plane.space.enabled }}"
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        space:
+          enabled: true
+          primary: true
+          imageSelector: spaceImage
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /spaces/
+              port: 3000
+            readiness:
+              enabled: true
+              type: http
+              path: /spaces/
+              port: 3000
+            startup:
+              enabled: true
+              type: http
+              path: /spaces/
+              port: 3000
+  admin:
+    enabled: "{{ .Values.plane.admin.enabled }}"
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        admin:
+          enabled: true
+          primary: true
+          imageSelector: adminImage
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: 3000
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: 3000
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: 3000
+  live:
+    enabled: "{{ .Values.plane.live.enabled }}"
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        live:
+          enabled: true
+          primary: true
+          imageSelector: liveImage
+          command: node
+          args:
+            - apps/live
+          probes:
+            liveness:
+              enabled: true
+              type: tcp
+              port: 3000
+            readiness:
+              enabled: true
+              type: tcp
+              port: 3000
+            startup:
+              enabled: true
+              type: tcp
+              port: 3000
+          env:
+            API_BASE_URL: "http://api:8000"
+            LIVE_SERVER_SECRET_KEY: "{{ .Values.plane.live.secret_key }}"
+            REDIS_URL:
+              secretKeyRef:
+                expandObjectName: false
+                name: "{{ .Release.Name }}-rediscreds"
+                key: url
+  api:
+    enabled: true
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        api:
+          enabled: true
+          primary: true
+          imageSelector: image
+          command: ./bin/docker-entrypoint-api.sh
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: 8000
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: 8000
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: 8000
+          env: &planeBackendEnv
+            WEB_URL: "{{ .Values.plane.web_url }}"
+            DEBUG: "{{ ternary \"1\" \"0\" .Values.plane.debug }}"
+            SECRET_KEY: "{{ .Values.plane.secret_key }}"
+            SENTRY_DSN: "{{ .Values.plane.sentry_dsn }}"
+            SENTRY_ENVIRONMENT: "{{ .Values.plane.sentry_environment }}"
+            CORS_ALLOWED_ORIGINS: "{{ .Values.plane.cors_allowed_origins }}"
+            GUNICORN_WORKERS: "1"
+            USE_MINIO: "1"
+            FILE_SIZE_LIMIT: "{{ .Values.plane.file_size_limit }}"
+            LIVE_SERVER_SECRET_KEY: "{{ .Values.plane.live.secret_key }}"
+            API_KEY_RATE_LIMIT: "60/minute"
+            WEBHOOK_ALLOWED_IPS: ""
+            WEBHOOK_ALLOWED_HOSTS: ""
+            DATABASE_URL:
+              secretKeyRef:
+                name: cnpg-main-urls
+                key: nossl
+            REDIS_URL:
+              secretKeyRef:
+                expandObjectName: false
+                name: "{{ .Release.Name }}-rediscreds"
+                key: url
+            AMQP_URL: "{{ printf \"amqp://%s:%s@%s-plane-rabbitmq:5672/%s\" .Values.plane.mq.user (urlquery .Values.plane.mq.password) .Release.Name .Values.plane.mq.vhost }}"
+            AWS_ACCESS_KEY_ID: "{{ .Values.plane.storage.access_key }}"
+            AWS_SECRET_ACCESS_KEY: "{{ .Values.plane.storage.secret_key }}"
+            AWS_S3_ENDPOINT_URL: "http://{{ .Release.Name }}-plane-minio:9000"
+            AWS_S3_BUCKET_NAME: "{{ .Values.plane.storage.bucket }}"
+            AWS_REGION: ""
+  worker:
+    enabled: true
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        worker:
+          enabled: true
+          primary: true
+          imageSelector: image
+          probes:
+            liveness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            readiness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            startup:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+          command: ./bin/docker-entrypoint-worker.sh
+          env: *planeBackendEnv
+  beat-worker:
+    enabled: true
+    type: Deployment
+    strategy: RollingUpdate
+    podSpec:
+      containers:
+        beat-worker:
+          enabled: true
+          primary: true
+          imageSelector: image
+          probes:
+            liveness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            readiness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            startup:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+          command: ./bin/docker-entrypoint-beat.sh
+          env: *planeBackendEnv
+  migrator:
+    enabled: true
+    type: Job
+    podSpec:
+      restartPolicy: Never
+      containers:
+        migrator:
+          enabled: true
+          primary: true
+          imageSelector: image
+          command: ./bin/docker-entrypoint-migrator.sh
+          env: *planeBackendEnv
+          probes:
+            liveness:
+              enabled: false
+            readiness:
+              enabled: false
+            startup:
+              enabled: false
+  plane-rabbitmq:
+    enabled: true
+    type: StatefulSet
+    podSpec:
+      containers:
+        plane-rabbitmq:
+          enabled: true
+          primary: true
+          imageSelector: rabbitmqImage
+          probes:
+            liveness:
+              enabled: true
+              type: tcp
+              port: 5672
+            readiness:
+              enabled: true
+              type: tcp
+              port: 5672
+            startup:
+              enabled: true
+              type: tcp
+              port: 5672
+          env:
+            RABBITMQ_DEFAULT_USER: "{{ .Values.plane.mq.user }}"
+            RABBITMQ_DEFAULT_PASS: "{{ .Values.plane.mq.password }}"
+            RABBITMQ_DEFAULT_VHOST: "{{ .Values.plane.mq.vhost }}"
+            RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2 2 +sbwt none +sbwtdcpu none +sbwtdio none"
+  plane-minio:
+    enabled: true
+    type: StatefulSet
+    podSpec:
+      containers:
+        plane-minio:
+          enabled: true
+          primary: true
+          imageSelector: minioImage
+          command: minio
+          args:
+            - server
+            - /export
+            - --console-address
+            - ":9090"
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /minio/health/live
+              port: 9000
+            readiness:
+              enabled: true
+              type: http
+              path: /minio/health/ready
+              port: 9000
+            startup:
+              enabled: true
+              type: http
+              path: /minio/health/live
+              port: 9000
+          env:
+            MINIO_ROOT_USER: "{{ .Values.plane.storage.access_key }}"
+            MINIO_ROOT_PASSWORD: "{{ .Values.plane.storage.secret_key }}"
+
+persistence:
+  rabbitmq:
+    enabled: true
+    targetSelector:
+      plane-rabbitmq:
+        plane-rabbitmq:
+          mountPath: /var/lib/rabbitmq
+  minio:
+    enabled: true
+    targetSelector:
+      plane-minio:
+        plane-minio:
+          mountPath: /export
+  logs:
+    enabled: true
+    type: emptyDir
+    targetSelector:
+      api:
+        api:
+          mountPath: /code/plane/logs
+      worker:
+        worker:
+          mountPath: /code/plane/logs
+      beat-worker:
+        beat-worker:
+          mountPath: /code/plane/logs
+
+# Enabled redis
+redis:
+  enabled: true
+  redisUsername: default
+
+# Enabled postgres
+cnpg:
+  main:
+    enabled: true
+    user: plane
+    database: plane
+    cluster:
+      singleNode: true
+      instances: 1
