@@ -1,0 +1,219 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: ghcr.io/reactive-resume/reactive-resume
+  pullPolicy: IfNotPresent
+  tag: 6.0.3@sha256:1f9e08ad323c9b7c034ba453ffeef67c61e689a3e29541c77da9b9ef1aedb588
+
+seaweedfsImage:
+  repository: docker.io/chrislusf/seaweedfs
+  pullPolicy: IfNotPresent
+  tag: latest@sha256:aba492e2a4e4c90bff795745e8e660affa1f09e7650f5981bd7bccd1a06cd931
+
+reactiveResume:
+  # Public URL where the app is served (e.g. https://resume.example.com)
+  appUrl: http://localhost:10715
+
+  # Sensitive configuration
+  secret:
+    # MUST be changed to a secure random value
+    authSecret: CHANGE-ME-TO-A-SECURE-SECRET-KEY-IN-PRODUCTION
+    encryptionSecret: CHANGE-ME-TO-A-SECURE-AGENT-SECRET-IN-PRODUCTION
+    # OAuth providers
+    googleClientId: ""
+    googleClientSecret: ""
+    githubClientId: ""
+    githubClientSecret: ""
+    linkedinClientId: ""
+    linkedinClientSecret: ""
+    oauthProviderName: ""
+    oauthClientId: ""
+    oauthClientSecret: ""
+    # OpenAI-compatible AI features
+    betterAuthApiKey: ""
+    openaiAppsChallengeToken: ""
+    googleCloudApiKey: ""
+    crowdinProjectId: ""
+    crowdinApiToken: ""
+    # SMTP (email) configuration
+    smtpUser: ""
+    smtpPass: ""
+
+  # Non-sensitive configuration
+  config:
+    trustedProxies: ""
+    # External database URL, used when CNPG is disabled
+    # databaseUrl: postgresql://user:pass@host:5432/postgres
+    # External Redis URL, used when the Valkey dependency is disabled
+    # redisUrl: redis://host:6379
+    # S3-compatible storage (required). The bundled SeaweedFS provides it by default.
+    s3AccessKeyId: seaweedfs
+    s3SecretAccessKey: seaweedfs
+    s3Region: us-east-1
+    # s3Endpoint: http://<fullname>-seaweedfs:8333
+    s3Bucket: reactive-resume
+    s3ForcePathStyle: "true"
+    smtpHost: ""
+    smtpPort: ""
+    smtpFrom: Reactive Resume <noreply@rxresu.me>
+    smtpSecure: "false"
+    oauthDiscoveryUrl: ""
+    oauthAuthorizationUrl: ""
+    oauthTokenUrl: ""
+    oauthUserInfoUrl: ""
+    oauthScopes: openid profile email
+    # Feature flags
+    disableSignups: "false"
+    disableEmailAuth: "false"
+    enableGuestLogin: "false"
+    disableImageProcessing: "false"
+    disableApiRateLimit: "false"
+    allowUnsafeOauthRedirectUri: "false"
+    allowUnsafeAiBaseUrl: "false"
+
+# Bundled S3 storage (SeaweedFS), required by the app for uploads and assets.
+# Disable and point reactiveResume.config.s3Endpoint at your own S3-compatible
+# storage to use an external one.
+seaweedfs:
+  enabled: true
+
+securityContext:
+  container:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: false
+    runAsUser: 1000
+    runAsGroup: 1000
+
+service:
+  main:
+    ports:
+      main:
+        protocol: http
+        targetPort: 3000
+        port: 10715
+  seaweedfs:
+    enabled: "{{ .Values.seaweedfs.enabled }}"
+    targetSelector: seaweedfs
+    ports:
+      seaweedfs:
+        enabled: true
+        targetSelector: seaweedfs
+        protocol: http
+        targetPort: 8333
+        port: 10716
+
+workload:
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: image
+          env:
+            PORT: "3000"
+            SERVER_PORT: "3001"
+            APP_URL: "{{ .Values.reactiveResume.appUrl }}"
+            TRUSTED_PROXIES: "{{ .Values.reactiveResume.config.trustedProxies }}"
+            STRICT_SCHEMA_CHECK: "false"
+            S3_ACCESS_KEY_ID: "{{ .Values.reactiveResume.config.s3AccessKeyId }}"
+            S3_SECRET_ACCESS_KEY: "{{ .Values.reactiveResume.config.s3SecretAccessKey }}"
+            S3_REGION: "{{ .Values.reactiveResume.config.s3Region }}"
+            S3_BUCKET: "{{ .Values.reactiveResume.config.s3Bucket }}"
+            S3_FORCE_PATH_STYLE: "{{ .Values.reactiveResume.config.s3ForcePathStyle }}"
+            SMTP_HOST: "{{ .Values.reactiveResume.config.smtpHost }}"
+            SMTP_PORT: "{{ .Values.reactiveResume.config.smtpPort }}"
+            SMTP_FROM: "{{ .Values.reactiveResume.config.smtpFrom }}"
+            SMTP_SECURE: "{{ .Values.reactiveResume.config.smtpSecure }}"
+            OAUTH_DISCOVERY_URL: "{{ .Values.reactiveResume.config.oauthDiscoveryUrl }}"
+            OAUTH_AUTHORIZATION_URL: "{{ .Values.reactiveResume.config.oauthAuthorizationUrl }}"
+            OAUTH_TOKEN_URL: "{{ .Values.reactiveResume.config.oauthTokenUrl }}"
+            OAUTH_USER_INFO_URL: "{{ .Values.reactiveResume.config.oauthUserInfoUrl }}"
+            OAUTH_SCOPES: "{{ .Values.reactiveResume.config.oauthScopes }}"
+            FLAG_DISABLE_SIGNUPS: "{{ .Values.reactiveResume.config.disableSignups }}"
+            FLAG_DISABLE_EMAIL_AUTH: "{{ .Values.reactiveResume.config.disableEmailAuth }}"
+            FLAG_ENABLE_GUEST_LOGIN: "{{ .Values.reactiveResume.config.enableGuestLogin }}"
+            FLAG_DISABLE_IMAGE_PROCESSING: "{{ .Values.reactiveResume.config.disableImageProcessing }}"
+            FLAG_DISABLE_API_RATE_LIMIT: "{{ .Values.reactiveResume.config.disableApiRateLimit }}"
+            FLAG_ALLOW_UNSAFE_OAUTH_REDIRECT_URI: "{{ .Values.reactiveResume.config.allowUnsafeOauthRedirectUri }}"
+            FLAG_ALLOW_UNSAFE_AI_BASE_URL: "{{ .Values.reactiveResume.config.allowUnsafeAiBaseUrl }}"
+          envFrom:
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+  # Bundled S3-compatible storage (SeaweedFS with S3 + filer)
+  seaweedfs:
+    enabled: "{{ .Values.seaweedfs.enabled }}"
+    type: Deployment
+    podSpec:
+      containers:
+        seaweedfs:
+          enabled: true
+          primary: true
+          imageSelector: seaweedfsImage
+          command:
+            - server
+            - -s3
+            - -filer
+            - -dir=/data
+            - -ip=0.0.0.0
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.seaweedfs.ports.seaweedfs.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.seaweedfs.ports.seaweedfs.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.seaweedfs.ports.seaweedfs.targetPort }}"
+
+persistence:
+  data:
+    enabled: true
+    mountPath: /app/data
+    targetSelector:
+      main:
+        main:
+          mountPath: /app/data
+  seaweedfs:
+    enabled: true
+    mountPath: /data
+    targetSelector:
+      seaweedfs:
+        seaweedfs:
+          mountPath: /data
+
+cnpg:
+  main:
+    enabled: true
+    user: postgres
+    database: postgres
+
+redis:
+  enabled: true
+  redisUsername: default
