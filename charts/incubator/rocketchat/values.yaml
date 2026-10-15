@@ -1,0 +1,179 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: docker.io/rocketchat/rocket.chat
+  pullPolicy: IfNotPresent
+  tag: 8.9.0@sha256:4d0e27055f9aecbd2592a22a4871cfbea64fe574fe514bd6d7add048e277c56d
+
+mongoImage:
+  repository: docker.io/mongodb/mongodb-community-server
+  pullPolicy: IfNotPresent
+  tag: 8.0-ubi8@sha256:28ccec92c58c5cf8197032d059a68b46d7e48bc0dfe72f2abba7122c0dff1d17
+
+rocketchat:
+  # Public URL where Rocket.Chat is served (e.g. https://chat.example.com)
+  rootUrl: http://localhost:10717
+
+  # Bundled MongoDB (single-node replica set rs0, as required by Rocket.Chat).
+  # Disable and set the external MongoDB URLs below to use an external
+  # database (which must itself run as a replica set).
+  mongodb:
+    enabled: true
+    database: rocketchat
+    username: rocketchat
+    password: CHANGE-ME-TO-A-LONG-PASSWORD
+    # External MongoDB URLs, used when the bundled MongoDB is disabled
+    # mongoUrl: mongodb://user:pass@host:27017/rocketchat?replicaSet=rs0
+    # mongoOplogUrl: mongodb://user:pass@host:27017/local?replicaSet=rs0&authSource=admin
+
+  # SMTP (email) configuration
+  smtp:
+    enabled: false
+    host: ""
+    port: "587"
+    username: ""
+    password: ""
+    from: "Rocket.Chat <no-reply@example.com>"
+
+  # Enterprise license (optional)
+  license: ""
+
+securityContext:
+  container:
+    runAsNonRoot: false
+    readOnlyRootFilesystem: false
+    runAsUser: 0
+    runAsGroup: 0
+
+service:
+  main:
+    ports:
+      main:
+        protocol: http
+        targetPort: 3000
+        port: 10717
+  mongodb:
+    enabled: "{{ .Values.rocketchat.mongodb.enabled }}"
+    targetSelector: mongodb
+    ports:
+      mongodb:
+        enabled: true
+        targetSelector: mongodb
+        protocol: tcp
+        targetPort: 27017
+        port: 10718
+
+workload:
+  # Rocket.Chat main app
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: image
+          env:
+            PORT: "{{ .Values.service.main.ports.main.targetPort }}"
+            ROOT_URL: "{{ .Values.rocketchat.rootUrl }}"
+            DEPLOY_PLATFORM: helm-chart
+            MONGO_URL: '{{ include "rocketchat.mongoUrl" $ }}'
+            MONGO_OPLOG_URL: '{{ include "rocketchat.mongoOplogUrl" $ }}'
+            MAIL_URL: '{{ include "rocketchat.mailUrl" $ }}'
+            OVERWRITE_SETTING_Show_Setup_Wizard: '{{ if .Values.rocketchat.license }}completed{{ end }}'
+            ROCKETCHAT_LICENSE: "{{ .Values.rocketchat.license }}"
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /api/info
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /api/info
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /api/info
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+  # Bundled MongoDB: single-node replica set (rs0) with auth, matching the
+  # upstream Rocket.Chat compose setup.
+  mongodb:
+    enabled: "{{ .Values.rocketchat.mongodb.enabled }}"
+    type: StatefulSet
+    podSpec:
+      containers:
+        mongodb:
+          enabled: true
+          primary: true
+          imageSelector: mongoImage
+          command:
+            - bash
+            - -c
+            - |
+              set -m
+              mongod --replSet rs0 --bind_ip_all --port {{ .Values.service.mongodb.ports.mongodb.targetPort }} --fork --logpath /tmp/mongod.log
+              until mongosh --port {{ .Values.service.mongodb.ports.mongodb.targetPort }} --quiet --eval "db.adminCommand('ping').ok" | grep -q 1; do
+                echo "Waiting for mongod..."
+                sleep 2
+              done
+              mongosh --port {{ .Values.service.mongodb.ports.mongodb.targetPort }} --quiet --eval "
+                try { rs.status().ok } catch (e) {
+                  rs.initiate({_id: 'rs0', members: [{_id: 0, host: '{{ include "tc.v1.common.lib.chart.names.fullname" $ }}-mongodb:{{ .Values.service.mongodb.ports.mongodb.targetPort }}'}]});
+                }
+              "
+              until mongosh --port {{ .Values.service.mongodb.ports.mongodb.targetPort }} --quiet --eval "try { rs.status().myState } catch (e) { 0 }" | grep -q 1; do
+                echo "Waiting for replica set primary..."
+                sleep 2
+              done
+              mongosh --port {{ .Values.service.mongodb.ports.mongodb.targetPort }} --quiet --eval "
+                try {
+                  db.getSiblingDB('admin').createUser({user: '{{ .Values.rocketchat.mongodb.username }}', pwd: '{{ .Values.rocketchat.mongodb.password }}', roles: [{role: 'readWrite', db: '{{ .Values.rocketchat.mongodb.database }}'}, {role: 'clusterMonitor', db: 'admin'}]});
+                } catch (e) { print('user already exists: ' + e.codeName); }
+              "
+              echo "MongoDB replica set ready"
+              tail -f /tmp/mongod.log
+          probes:
+            liveness:
+              enabled: true
+              type: exec
+              command:
+                - mongosh
+                - --port
+                - "{{ .Values.service.mongodb.ports.mongodb.targetPort }}"
+                - --quiet
+                - --eval
+                - db.adminCommand('ping').ok
+            readiness:
+              enabled: true
+              type: exec
+              command:
+                - mongosh
+                - --port
+                - "{{ .Values.service.mongodb.ports.mongodb.targetPort }}"
+                - --quiet
+                - --eval
+                - db.adminCommand('ping').ok
+            startup:
+              enabled: true
+              type: exec
+              command:
+                - mongosh
+                - --port
+                - "{{ .Values.service.mongodb.ports.mongodb.targetPort }}"
+                - --quiet
+                - --eval
+                - db.adminCommand('ping').ok
+
+persistence:
+  mongodb:
+    enabled: true
+    mountPath: /data/db
+    targetSelector:
+      mongodb:
+        mongodb:
+          mountPath: /data/db
