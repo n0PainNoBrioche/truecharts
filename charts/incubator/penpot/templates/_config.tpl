@@ -138,8 +138,10 @@ data:
 enabled: true
 data:
   {{- if $redisUri }}
+  PENPOT_REDIS_URI: {{ $redisUri | quote }}
   PENPOT_MCP_REDIS_URI: {{ $redisUri | quote }}
   {{- else if .Values.penpot.redisUri }}
+  PENPOT_REDIS_URI: {{ .Values.penpot.redisUri | quote }}
   PENPOT_MCP_REDIS_URI: {{ .Values.penpot.redisUri | quote }}
   {{- end }}
 {{- end -}}

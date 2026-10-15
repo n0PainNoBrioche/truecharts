@@ -281,18 +281,18 @@ workload:
             PENPOT_INTERNAL_URI: '{{ printf "%s:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.main.ports.main.port }}'
             PENPOT_TEMPDIR: /tmp/penpot-exporter
           envFrom:
+            - configMapRef:
+                name: redis
             - secretRef:
                 name: secrets
           probes:
             liveness:
               enabled: true
-              type: http
-              path: /
+              type: tcp
               port: "{{ .Values.service.exporter.ports.exporter.targetPort }}"
             readiness:
               enabled: true
-              type: http
-              path: /
+              type: tcp
               port: "{{ .Values.service.exporter.ports.exporter.targetPort }}"
             startup:
               enabled: true
