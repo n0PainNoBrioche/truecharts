@@ -202,16 +202,25 @@ workload:
           probes:
             liveness:
               enabled: true
-              type: tcp
-              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
             readiness:
               enabled: true
-              type: tcp
-              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
             startup:
               enabled: true
-              type: tcp
-              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
 
 cnpg:
   main:
