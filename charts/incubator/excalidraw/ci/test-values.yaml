@@ -1,0 +1,4 @@
+excalidraw:
+  room:
+    enabled: true
+    corsOrigin: http://excalidraw.local

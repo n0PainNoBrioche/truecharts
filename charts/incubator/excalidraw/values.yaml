@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: docker.io/excalidraw/excalidraw
+  pullPolicy: IfNotPresent
+  tag: latest@sha256:4542f30bea392b833822d0e7db4fa2220e6706ca962c082add2665159fa91758
+
+roomImage:
+  repository: docker.io/excalidraw/excalidraw-room
+  pullPolicy: IfNotPresent
+  tag: latest@sha256:2fe999f9be4379e3ee282fc45d75d84a691a6383dde33544514cc395287c7a70
+
+excalidraw:
+  # Optional collaboration room server (WebSocket relay).
+  # Note: the official excalidraw frontend image is a static nginx build with
+  # the collaboration server URL baked in at build time, so enabling the room
+  # server alone does not wire collaboration to it. It is provided for
+  # completeness and custom frontend builds.
+  room:
+    enabled: false
+    # Comma-separated list of allowed CORS origins (e.g. https://draw.example.com)
+    # Empty allows all origins.
+    corsOrigin: "*"
+
+securityContext:
+  container:
+    runAsNonRoot: false
+    readOnlyRootFilesystem: false
+    runAsUser: 0
+    runAsGroup: 0
+
+service:
+  main:
+    targetSelector: main
+    ports:
+      main:
+        targetSelector: main
+        protocol: http
+        targetPort: 80
+        port: 10711
+  room:
+    enabled: "{{ .Values.excalidraw.room.enabled }}"
+    targetSelector: room
+    ports:
+      room:
+        enabled: true
+        targetSelector: room
+        protocol: http
+        targetPort: 80
+        port: 10712
+
+workload:
+  # Excalidraw frontend (static nginx build)
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: image
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+  # Collaboration room server (Socket.IO relay)
+  room:
+    enabled: "{{ .Values.excalidraw.room.enabled }}"
+    type: Deployment
+    podSpec:
+      containers:
+        room:
+          enabled: true
+          primary: true
+          imageSelector: roomImage
+          env:
+            PORT: "{{ .Values.service.room.ports.room.targetPort }}"
+            CORS_ORIGIN: "{{ .Values.excalidraw.room.corsOrigin }}"
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.room.ports.room.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.room.ports.room.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.room.ports.room.targetPort }}"
