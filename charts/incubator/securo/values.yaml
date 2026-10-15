@@ -1,0 +1,428 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: ghcr.io/securo-finance/securo-frontend
+  pullPolicy: IfNotPresent
+  tag: 0.14.0@sha256:87893e909bbb560d1432dfd2b0cc085813d755b4964ca74f608b0458b160ba3d
+
+backendImage:
+  repository: ghcr.io/securo-finance/securo-backend
+  pullPolicy: IfNotPresent
+  tag: 0.14.0@sha256:bee8a04743cb3a167882ef676d65dbb2f4f5bfa166588169dd6ce74adb079513
+
+securo:
+  # Public domain used to reach the frontend (FRONTEND_URL / OAuth redirects)
+  domain: chart-example.local
+  # Set to true when the app is served over HTTPS
+  tls: false
+  # Number of Celery worker processes per pod
+  workerConcurrency: 2
+
+  # Sensitive configuration, rendered as env variables (SNAKE_UPPER_CASE)
+  secret:
+    # MUST be changed to a strong random value
+    secretKey: CHANGE-ME-TO-A-LONG-RANDOM-STRING
+    # Must be changed when the agents (MCP) feature is enabled
+    agentsMcpJwtSecret: CHANGE-ME-TO-A-LONG-RANDOM-STRING
+    pluggyClientId: ""
+    pluggyClientSecret: ""
+    enableBankingAppId: ""
+    # Content of the PEM file
+    enableBankingPrivateKey: ""
+    oidcClientId: ""
+    oidcClientSecret: ""
+    openexchangeratesAppId: ""
+    agentsOpenaiApiKey: ""
+    agentsAnthropicApiKey: ""
+    agentsOpenaiCompatApiKey: ""
+
+  # Non-sensitive configuration, rendered as env variables (SNAKE_UPPER_CASE)
+  # Leave the database and redis URLs empty to use the bundled CNPG and Valkey
+  config:
+    debug: "false"
+    databaseUrl: ""
+    redisUrl: ""
+    celeryBrokerUrl: ""
+    celeryResultBackend: ""
+    pluggyOauthRedirectUri: ""
+    enableBankingApiUrl: https://api.enablebanking.com
+    enableBankingOauthRedirectUri: ""
+    simplefinEnabled: "false"
+    simplefinApiUrl: https://beta-bridge.simplefin.org
+    oidcEnabled: "false"
+    oidcProviderName: OIDC
+    oidcDiscoveryUrl: ""
+    oidcRedirectUri: ""
+    oidcScopes: openid email profile
+    oidcAutoRegister: "true"
+    oidcExistingUserLinkMode: disabled
+    oidcRequireVerifiedEmail: "true"
+    oidcSyncRoles: "false"
+    oidcRolesClaim: groups
+    oidcAdminRoles: ""
+    oidcWorkspaceRoleMap: ""
+    fxSyncMode: on_demand
+    tesouroDiretoEnabled: "true"
+    agentsEnabled: "false"
+    agentsExtraMcpServers: ""
+    agentsMcpExternalTtlDays: "90"
+    agentsDefaultProvider: ollama
+    agentsDefaultModel: ""
+    agentsOllamaBaseUrl: http://ollama:11434
+    agentsOpenaiCompatBaseUrl: ""
+    agentsEmbeddingProvider: native
+    agentsEmbeddingModel: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+
+# -- The built-in MCP server for the agents feature
+mcpServer:
+  enabled: false
+
+# -- External database URL, used when CNPG is disabled
+# databaseUrl: postgresql+asyncpg://user:pass@host:5432/securo
+
+securityContext:
+  container:
+    runAsNonRoot: false
+    readOnlyRootFilesystem: false
+    runAsUser: 0
+    runAsGroup: 0
+
+service:
+  main:
+    targetSelector: frontend
+    ports:
+      main:
+        targetSelector: frontend
+        protocol: http
+        targetPort: 8080
+        port: 10700
+  backend:
+    enabled: true
+    targetSelector: main
+    ports:
+      backend:
+        enabled: true
+        targetSelector: main
+        protocol: http
+        targetPort: 8000
+        port: 10701
+  mcpserver:
+    enabled: "{{ .Values.mcpServer.enabled }}"
+    targetSelector: mcp-server
+    ports:
+      mcpserver:
+        enabled: true
+        targetSelector: mcp-server
+        protocol: http
+        targetPort: 8765
+        port: 10702
+
+workload:
+  # Backend (API)
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - uvicorn
+            - app.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+      initContainers:
+        migration:
+          enabled: "{{ .Values.cnpg.main.enabled }}"
+          type: init
+          imageSelector: backendImage
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 30); do
+                if alembic upgrade head; then
+                  echo "Migration successful."
+                  exit 0
+                fi
+                echo "Migration failed (database might not be ready). Retrying in 5 seconds..."
+                sleep 5
+              done
+              echo "Migration failed after multiple retries."
+              exit 1
+
+  # Frontend (nginx serving the SPA and proxying /api to the backend)
+  frontend:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        frontend:
+          enabled: true
+          primary: true
+          imageSelector: image
+          env:
+            BACKEND_URL: '{{ printf "%s-backend:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.backend.ports.backend.port }}'
+            FRONTEND_URL: '{{ printf "%s://%s" (ternary "https" "http" .Values.securo.tls) .Values.securo.domain }}'
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+  # Celery Worker
+  worker:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        worker:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - celery
+            - -A
+            - app.worker
+            - worker
+            - --loglevel=info
+            - --concurrency
+            - "{{ .Values.securo.workerConcurrency }}"
+          probes:
+            liveness:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            readiness:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            startup:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+
+  # Celery Beat must always stay a strict singleton (1 replica)
+  beat:
+    enabled: true
+    type: Deployment
+    podSpec:
+      replicas: 1
+      containers:
+        beat:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - celery
+            - -A
+            - app.worker
+            - beat
+            - --loglevel=info
+          probes:
+            liveness:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            readiness:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            startup:
+              enabled: true
+              type: tcp
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+
+  # Built-in MCP Server
+  mcp-server:
+    enabled: "{{ .Values.mcpServer.enabled }}"
+    type: Deployment
+    podSpec:
+      containers:
+        mcp-server:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - uvicorn
+            - mcp_server.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8765"
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /health
+              port: "{{ .Values.service.mcpserver.ports.mcpserver.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /health
+              port: "{{ .Values.service.mcpserver.ports.mcpserver.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /health
+              port: "{{ .Values.service.mcpserver.ports.mcpserver.targetPort }}"
+
+persistence:
+  # Shared across the Backend, Celery Worker, Beat and MCP Server pods.
+  # Use a ReadWriteMany storage class when pods span multiple nodes.
+  attachments:
+    enabled: true
+    mountPath: /app/data/attachments
+    targetSelector:
+      main:
+        main:
+          mountPath: /app/data/attachments
+      worker:
+        worker:
+          mountPath: /app/data/attachments
+      beat:
+        beat:
+          mountPath: /app/data/attachments
+      mcp-server:
+        mcp-server:
+          mountPath: /app/data/attachments
+  agent-knowledge:
+    enabled: true
+    mountPath: /app/data/agent_knowledge
+    targetSelector:
+      main:
+        main:
+          mountPath: /app/data/agent_knowledge
+      worker:
+        worker:
+          mountPath: /app/data/agent_knowledge
+      beat:
+        beat:
+          mountPath: /app/data/agent_knowledge
+      mcp-server:
+        mcp-server:
+          mountPath: /app/data/agent_knowledge
+  agent-embedding-models:
+    enabled: true
+    mountPath: /app/data/embedding_models
+    targetSelector:
+      main:
+        main:
+          mountPath: /app/data/embedding_models
+      worker:
+        worker:
+          mountPath: /app/data/embedding_models
+      beat:
+        beat:
+          mountPath: /app/data/embedding_models
+      mcp-server:
+        mcp-server:
+          mountPath: /app/data/embedding_models
+  nginx-template:
+    enabled: true
+    type: configmap
+    objectName: nginx-template
+    mountPath: /etc/nginx/templates/default.conf.template
+    subPath: default.conf.template
+    readOnly: true
+    targetSelector:
+      frontend:
+        frontend:
+          mountPath: /etc/nginx/templates/default.conf.template
+          subPath: default.conf.template
+
+configmap:
+  nginx-template:
+    enabled: true
+    data:
+      default.conf.template: |-
+        server {
+            listen 8080;
+            root /usr/share/nginx/html;
+            index index.html;
+
+            location /api/ {
+                proxy_pass ${BACKEND_URL};
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            location = /index.html {
+                add_header Cache-Control "no-store, no-cache, must-revalidate";
+                try_files $uri =404;
+            }
+
+            location / {
+                try_files $uri $uri/ /index.html;
+            }
+        }
+
+# Securo requires the pgvector extension, provided by CNPG `type: vectors`
+cnpg:
+  main:
+    enabled: true
+    type: vectors
+    user: securo
+    database: securo
+
+redis:
+  enabled: true
+  redisUsername: default
