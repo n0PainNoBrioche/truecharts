@@ -2,12 +2,12 @@
 image:
   repository: ghcr.io/securo-finance/securo-frontend
   pullPolicy: IfNotPresent
-  tag: 0.14.0@sha256:87893e909bbb560d1432dfd2b0cc085813d755b4964ca74f608b0458b160ba3d
+  tag: 0.16.4@sha256:68cc387d91f9a62750cacf58e031ad21b0c3f2b64fd18eada9e9612b978aa816
 
 backendImage:
   repository: ghcr.io/securo-finance/securo-backend
   pullPolicy: IfNotPresent
-  tag: 0.14.0@sha256:bee8a04743cb3a167882ef676d65dbb2f4f5bfa166588169dd6ce74adb079513
+  tag: 0.16.4@sha256:a04b6c73e569e8e38f0156926fa1d02a0f6f54603e8cfb464f3abfb377b7f22b
 
 securo:
   # Public domain used to reach the frontend (FRONTEND_URL / OAuth redirects)
@@ -39,6 +39,8 @@ securo:
   # Leave the database and redis URLs empty to use the bundled CNPG and Valkey
   config:
     debug: "false"
+    # Set false only when oidcEnabled, oidcDiscoveryUrl and oidcClientId are configured
+    localAuthEnabled: "true"
     databaseUrl: ""
     redisUrl: ""
     celeryBrokerUrl: ""
@@ -54,9 +56,10 @@ securo:
     oidcRedirectUri: ""
     oidcScopes: openid email profile
     oidcAutoRegister: "true"
-    oidcExistingUserLinkMode: disabled
     oidcRequireVerifiedEmail: "true"
     oidcSyncRoles: "false"
+    # Link OIDC logins to existing accounts with the same email: disabled, verified_email, or email
+    oidcExistingUserLinkMode: disabled
     oidcRolesClaim: groups
     oidcAdminRoles: ""
     oidcWorkspaceRoleMap: ""
