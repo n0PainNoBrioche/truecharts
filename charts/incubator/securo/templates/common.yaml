@@ -7,6 +7,12 @@
   {{- $_ := set .Values.configmap "config" $config -}}
 {{- end -}}
 
+{{/* Render the nginx template configmap */}}
+{{- $nginx := include "securo.nginxTemplate" . | fromYaml -}}
+{{- if $nginx -}}
+  {{- $_ := set .Values.configmap "nginx-template" $nginx -}}
+{{- end -}}
+
 {{/* Render the secrets for securo */}}
 {{- $secrets := include "securo.secrets" . | fromYaml -}}
 {{- if $secrets -}}
