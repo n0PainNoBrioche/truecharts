@@ -399,9 +399,20 @@ persistence:
 cnpg:
   main:
     enabled: true
-    type: vectors
+    # Securo requires the pgvector extension (CREATE EXTENSION vector), which
+    # pgvecto.rs (type: vectors) does not provide. Use the pgvector image
+    # (same image as the official securo chart) on a plain postgres cluster;
+    # it is based on the official postgres image and CNPG-compatible.
+    type: postgres
+    pgVersion: 16
     user: securo
     database: securo
+    cluster:
+      imageName: docker.io/pgvector/pgvector:pg16
+      initdb:
+        # pgvector must be created by a superuser; the app user is not one.
+        postInitApplicationSQL:
+          - CREATE EXTENSION IF NOT EXISTS vector;
 
 redis:
   enabled: true
