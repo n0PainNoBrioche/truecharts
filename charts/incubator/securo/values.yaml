@@ -196,7 +196,7 @@ workload:
             runAsUser: 101
             runAsGroup: 101
           env:
-            BACKEND_URL: '{{ printf "%s-backend:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.backend.ports.backend.port }}'
+            BACKEND_URL: '{{ printf "http://%s-backend:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.backend.ports.backend.port }}'
             FRONTEND_URL: '{{ printf "%s://%s" (ternary "https" "http" .Values.securo.tls) .Values.securo.domain }}'
           probes:
             liveness:
