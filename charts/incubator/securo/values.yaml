@@ -396,19 +396,16 @@ persistence:
       mcp-server:
         mcp-server:
           mountPath: /app/data/embedding_models
+# Securo requires the pgvector extension (CREATE EXTENSION vector), which
+# pgvecto.rs (type: vectors) does not provide. The default CNPG postgres
+# image ships pgvector (same approach as the bookorbit chart).
 cnpg:
   main:
     enabled: true
-    # Securo requires the pgvector extension (CREATE EXTENSION vector), which
-    # pgvecto.rs (type: vectors) does not provide. Use the pgvector image
-    # (same image as the official securo chart) on a plain postgres cluster;
-    # it is based on the official postgres image and CNPG-compatible.
     type: postgres
-    pgVersion: 16
     user: securo
     database: securo
     cluster:
-      imageName: docker.io/pgvector/pgvector:0.8.0-pg16
       initdb:
         # pgvector must be created by a superuser; the app user is not one.
         postInitApplicationSQL:
