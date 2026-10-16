@@ -408,7 +408,7 @@ cnpg:
     user: securo
     database: securo
     cluster:
-      imageName: docker.io/pgvector/pgvector:pg16
+      imageName: docker.io/pgvector/pgvector:0.8.0-pg16
       initdb:
         # pgvector must be created by a superuser; the app user is not one.
         postInitApplicationSQL:
