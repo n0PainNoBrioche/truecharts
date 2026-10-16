@@ -1,0 +1,431 @@
+# yaml-language-server: $schema=./values.schema.json
+image:
+  repository: ghcr.io/securo-finance/securo-frontend
+  pullPolicy: IfNotPresent
+  tag: 0.16.4@sha256:68cc387d91f9a62750cacf58e031ad21b0c3f2b64fd18eada9e9612b978aa816
+
+backendImage:
+  repository: ghcr.io/securo-finance/securo-backend
+  pullPolicy: IfNotPresent
+  tag: 0.16.4@sha256:a04b6c73e569e8e38f0156926fa1d02a0f6f54603e8cfb464f3abfb377b7f22b
+
+securo:
+  # Public domain used to reach the frontend (FRONTEND_URL / OAuth redirects)
+  domain: chart-example.local
+  # Set to true when the app is served over HTTPS
+  tls: false
+  # Number of Celery worker processes per pod
+  workerConcurrency: 2
+
+  # Sensitive configuration, rendered as env variables (SNAKE_UPPER_CASE)
+  secret:
+    # MUST be changed to a strong random value
+    secretKey: CHANGE-ME-TO-A-LONG-RANDOM-STRING
+    # Must be changed when the agents (MCP) feature is enabled
+    agentsMcpJwtSecret: CHANGE-ME-TO-A-LONG-RANDOM-STRING
+    pluggyClientId: ""
+    pluggyClientSecret: ""
+    enableBankingAppId: ""
+    # Content of the PEM file
+    enableBankingPrivateKey: ""
+    oidcClientId: ""
+    oidcClientSecret: ""
+    openexchangeratesAppId: ""
+    agentsOpenaiApiKey: ""
+    agentsAnthropicApiKey: ""
+    agentsOpenaiCompatApiKey: ""
+
+  # Non-sensitive configuration, rendered as env variables (SNAKE_UPPER_CASE)
+  # Leave the database and redis URLs empty to use the bundled CNPG and Valkey
+  config:
+    debug: "false"
+    # Set false only when oidcEnabled, oidcDiscoveryUrl and oidcClientId are configured
+    localAuthEnabled: "true"
+    databaseUrl: ""
+    redisUrl: ""
+    celeryBrokerUrl: ""
+    celeryResultBackend: ""
+    pluggyOauthRedirectUri: ""
+    enableBankingApiUrl: https://api.enablebanking.com
+    enableBankingOauthRedirectUri: ""
+    simplefinEnabled: "false"
+    simplefinApiUrl: https://beta-bridge.simplefin.org
+    oidcEnabled: "false"
+    oidcProviderName: OIDC
+    oidcDiscoveryUrl: ""
+    oidcRedirectUri: ""
+    oidcScopes: openid email profile
+    oidcAutoRegister: "true"
+    oidcRequireVerifiedEmail: "true"
+    oidcSyncRoles: "false"
+    # Link OIDC logins to existing accounts with the same email: disabled, verified_email, or email
+    oidcExistingUserLinkMode: disabled
+    oidcRolesClaim: groups
+    oidcAdminRoles: ""
+    oidcWorkspaceRoleMap: ""
+    fxSyncMode: on_demand
+    tesouroDiretoEnabled: "true"
+    agentsEnabled: "false"
+    agentsExtraMcpServers: ""
+    agentsMcpExternalTtlDays: "90"
+    agentsDefaultProvider: ollama
+    agentsDefaultModel: ""
+    agentsOllamaBaseUrl: http://ollama:11434
+    agentsOpenaiCompatBaseUrl: ""
+    agentsEmbeddingProvider: native
+    agentsEmbeddingModel: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+
+# -- The built-in MCP server for the agents feature
+mcpServer:
+  enabled: false
+
+# -- External database URL, used when CNPG is disabled
+# databaseUrl: postgresql+asyncpg://user:pass@host:5432/securo
+securityContext:
+  container:
+    runAsNonRoot: false
+    readOnlyRootFilesystem: false
+    runAsUser: 0
+    runAsGroup: 0
+
+service:
+  main:
+    targetSelector: frontend
+    ports:
+      main:
+        targetSelector: frontend
+        protocol: http
+        targetPort: 8080
+        port: 10700
+  backend:
+    enabled: true
+    targetSelector: main
+    ports:
+      backend:
+        enabled: true
+        targetSelector: main
+        protocol: http
+        targetPort: 8000
+        port: 10701
+  mcpserver:
+    enabled: "{{ .Values.mcpServer.enabled }}"
+    targetSelector: mcp-server
+    ports:
+      mcpserver:
+        enabled: true
+        targetSelector: mcp-server
+        protocol: http
+        targetPort: 8765
+        port: 10702
+
+workload:
+  # Backend (API)
+  main:
+    enabled: true
+    primary: true
+    type: Deployment
+    podSpec:
+      containers:
+        main:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - uvicorn
+            - app.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /api/health
+              port: "{{ .Values.service.backend.ports.backend.targetPort }}"
+      initContainers:
+        migration:
+          enabled: "{{ .Values.cnpg.main.enabled }}"
+          type: init
+          imageSelector: backendImage
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 30); do
+                if alembic upgrade head; then
+                  echo "Migration successful."
+                  exit 0
+                fi
+                echo "Migration failed (database might not be ready). Retrying in 5 seconds..."
+                sleep 5
+              done
+              echo "Migration failed after multiple retries."
+              exit 1
+
+  # Frontend (nginx serving the SPA and proxying /api to the backend)
+  frontend:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        frontend:
+          enabled: true
+          primary: true
+          imageSelector: image
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: false
+            runAsUser: 101
+            runAsGroup: 101
+          env:
+            BACKEND_URL: '{{ printf "http://%s-backend:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.backend.ports.backend.port }}'
+            FRONTEND_URL: '{{ printf "%s://%s" (ternary "https" "http" .Values.securo.tls) .Values.securo.domain }}'
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /
+              port: "{{ .Values.service.main.ports.main.targetPort }}"
+
+  # Celery Worker
+  worker:
+    enabled: true
+    type: Deployment
+    podSpec:
+      containers:
+        worker:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - celery
+            - -A
+            - app.worker
+            - worker
+            - --loglevel=info
+            - --concurrency
+            - "{{ .Values.securo.workerConcurrency }}"
+          probes:
+            liveness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            readiness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            startup:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+
+  # Celery Beat must always stay a strict singleton (1 replica)
+  beat:
+    enabled: true
+    type: Deployment
+    podSpec:
+      replicas: 1
+      containers:
+        beat:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - celery
+            - -A
+            - app.worker
+            - beat
+            - --loglevel=info
+          probes:
+            liveness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            readiness:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            startup:
+              enabled: true
+              type: exec
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+
+  # Built-in MCP Server
+  mcp-server:
+    enabled: "{{ .Values.mcpServer.enabled }}"
+    type: Deployment
+    podSpec:
+      containers:
+        mcp-server:
+          enabled: true
+          primary: true
+          imageSelector: backendImage
+          command:
+            - uvicorn
+            - mcp_server.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8765"
+          envFrom:
+            - configMapRef:
+                name: config
+            - secretRef:
+                name: secrets
+          probes:
+            liveness:
+              enabled: true
+              type: http
+              path: /health
+              port: "{{ .Values.service.mcpserver.ports.mcpserver.targetPort }}"
+            readiness:
+              enabled: true
+              type: http
+              path: /health
+              port: "{{ .Values.service.mcpserver.ports.mcpserver.targetPort }}"
+            startup:
+              enabled: true
+              type: http
+              path: /health
+              port: "{{ .Values.service.mcpserver.ports.mcpserver.targetPort }}"
+
+persistence:
+  nginx-template:
+    enabled: true
+    type: configmap
+    objectName: nginx-template
+    mountPath: /etc/nginx/templates/default.conf.template
+    subPath: default.conf.template
+    readOnly: true
+    targetSelector:
+      frontend:
+        frontend:
+          mountPath: /etc/nginx/templates/default.conf.template
+          subPath: default.conf.template
+  # Shared across the Backend, Celery Worker, Beat and MCP Server pods.
+  # Use a ReadWriteMany storage class when pods span multiple nodes.
+  attachments:
+    enabled: true
+    mountPath: /app/data/attachments
+    targetSelector:
+      main:
+        main:
+          mountPath: /app/data/attachments
+      worker:
+        worker:
+          mountPath: /app/data/attachments
+      beat:
+        beat:
+          mountPath: /app/data/attachments
+      mcp-server:
+        mcp-server:
+          mountPath: /app/data/attachments
+  agent-knowledge:
+    enabled: true
+    mountPath: /app/data/agent_knowledge
+    targetSelector:
+      main:
+        main:
+          mountPath: /app/data/agent_knowledge
+      worker:
+        worker:
+          mountPath: /app/data/agent_knowledge
+      beat:
+        beat:
+          mountPath: /app/data/agent_knowledge
+      mcp-server:
+        mcp-server:
+          mountPath: /app/data/agent_knowledge
+  agent-embedding-models:
+    enabled: true
+    mountPath: /app/data/embedding_models
+    targetSelector:
+      main:
+        main:
+          mountPath: /app/data/embedding_models
+      worker:
+        worker:
+          mountPath: /app/data/embedding_models
+      beat:
+        beat:
+          mountPath: /app/data/embedding_models
+      mcp-server:
+        mcp-server:
+          mountPath: /app/data/embedding_models
+# Securo requires the pgvector extension (CREATE EXTENSION vector), which
+# pgvecto.rs (type: vectors) does not provide. The default CNPG postgres
+# image ships pgvector (same approach as the bookorbit chart).
+cnpg:
+  main:
+    enabled: true
+    type: postgres
+    user: securo
+    database: securo
+    cluster:
+      initdb:
+        # pgvector must be created by a superuser; the app user is not one.
+        postInitApplicationSQL:
+          - CREATE EXTENSION IF NOT EXISTS vector;
+
+redis:
+  enabled: true
+  redisUsername: default
