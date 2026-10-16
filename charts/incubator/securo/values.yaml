@@ -78,7 +78,6 @@ mcpServer:
 
 # -- External database URL, used when CNPG is disabled
 # databaseUrl: postgresql+asyncpg://user:pass@host:5432/securo
-
 securityContext:
   container:
     runAsNonRoot: false
@@ -191,6 +190,11 @@ workload:
           enabled: true
           primary: true
           imageSelector: image
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: false
+            runAsUser: 101
+            runAsGroup: 101
           env:
             BACKEND_URL: '{{ printf "%s-backend:%v" (include "tc.v1.common.lib.chart.names.fullname" $) .Values.service.backend.ports.backend.port }}'
             FRONTEND_URL: '{{ printf "%s://%s" (ternary "https" "http" .Values.securo.tls) .Values.securo.domain }}'
@@ -392,48 +396,6 @@ persistence:
       mcp-server:
         mcp-server:
           mountPath: /app/data/embedding_models
-  nginx-template:
-    enabled: true
-    type: configmap
-    objectName: nginx-template
-    mountPath: /etc/nginx/templates/default.conf.template
-    subPath: default.conf.template
-    readOnly: true
-    targetSelector:
-      frontend:
-        frontend:
-          mountPath: /etc/nginx/templates/default.conf.template
-          subPath: default.conf.template
-
-configmap:
-  nginx-template:
-    enabled: true
-    data:
-      default.conf.template: |-
-        server {
-            listen 8080;
-            root /usr/share/nginx/html;
-            index index.html;
-
-            location /api/ {
-                proxy_pass ${BACKEND_URL};
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto $scheme;
-            }
-
-            location = /index.html {
-                add_header Cache-Control "no-store, no-cache, must-revalidate";
-                try_files $uri =404;
-            }
-
-            location / {
-                try_files $uri $uri/ /index.html;
-            }
-        }
-
-# Securo requires the pgvector extension, provided by CNPG `type: vectors`
 cnpg:
   main:
     enabled: true
